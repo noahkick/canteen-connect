@@ -27,6 +27,8 @@ const MenuManagement = () => {
     image_url: "",
     available: true,
   });
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string>("");
 
   useEffect(() => {
     checkAuth();
@@ -72,11 +74,48 @@ const MenuManagement = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    let imageUrl = formData.image_url;
+
+    // Upload image if a new file was selected
+    if (imageFile) {
+      try {
+        const fileExt = imageFile.name.split('.').pop();
+        const fileName = `${Math.random()}.${fileExt}`;
+        const filePath = `${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('menu-images')
+          .upload(filePath, imageFile);
+
+        if (uploadError) {
+          toast.error("Failed to upload image");
+          return;
+        }
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('menu-images')
+          .getPublicUrl(filePath);
+
+        imageUrl = publicUrl;
+
+        // Delete old image if updating
+        if (editingItem?.image_url) {
+          const oldPath = editingItem.image_url.split('/').pop();
+          if (oldPath) {
+            await supabase.storage.from('menu-images').remove([oldPath]);
+          }
+        }
+      } catch (error) {
+        toast.error("Failed to upload image");
+        return;
+      }
+    }
+
     const itemData = {
       name: formData.name,
       price: parseFloat(formData.price),
       category: formData.category,
-      image_url: formData.image_url || null,
+      image_url: imageUrl || null,
       available: formData.available,
     };
 
@@ -112,6 +151,8 @@ const MenuManagement = () => {
       image_url: "",
       available: true,
     });
+    setImageFile(null);
+    setImagePreview("");
     fetchMenuItems();
   };
 
@@ -124,11 +165,35 @@ const MenuManagement = () => {
       image_url: item.image_url || "",
       available: item.available,
     });
+    setImageFile(null);
+    setImagePreview(item.image_url || "");
     setIsDialogOpen(true);
+  };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this item?")) return;
+
+    const item = menuItems.find((i) => i.id === id);
+    
+    // Delete image from storage if it exists
+    if (item?.image_url) {
+      const path = item.image_url.split('/').pop();
+      if (path) {
+        await supabase.storage.from('menu-images').remove([path]);
+      }
+    }
 
     const { error } = await supabase.from("menu_items").delete().eq("id", id);
 
@@ -163,6 +228,8 @@ const MenuManagement = () => {
                       image_url: "",
                       available: true,
                     });
+                    setImageFile(null);
+                    setImagePreview("");
                   }}
                 >
                   <Plus className="w-4 h-4 mr-2" />
@@ -212,14 +279,23 @@ const MenuManagement = () => {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="image_url">Image URL (optional)</Label>
+                    <Label htmlFor="image">Image (optional)</Label>
                     <Input
-                      id="image_url"
-                      value={formData.image_url}
-                      onChange={(e) =>
-                        setFormData({ ...formData, image_url: e.target.value })
-                      }
+                      id="image"
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageChange}
+                      className="cursor-pointer"
                     />
+                    {imagePreview && (
+                      <div className="mt-2">
+                        <img
+                          src={imagePreview}
+                          alt="Preview"
+                          className="w-full h-32 object-cover rounded"
+                        />
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <input
